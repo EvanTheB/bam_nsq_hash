@@ -5,6 +5,8 @@
 #include "htslib/sam.h"
 
 #define bam_get_qname_l(b) ((b)->core.l_qname)
+#define bam_get_seq_l(b) (((b)->core.l_qseq + 1) / 2)
+#define bam_get_qual_l(b) ((b)->core.l_qseq)
 
 int main(int argc, char const *argv[])
 {
@@ -19,8 +21,10 @@ int main(int argc, char const *argv[])
     while (sam_read1(f, h, b1) >= 0)
     {
         acc += XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0);
+        acc += XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0);
+        acc += XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0);
     }
 
-    printf("%llu\n", acc);
+    printf("%llx\n", acc);
     return 0;
 }
