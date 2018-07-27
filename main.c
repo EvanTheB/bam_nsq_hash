@@ -4,6 +4,10 @@
 #include "xxhash.h"
 #include "htslib/sam.h"
 
+#ifdef __SANITIZE_ADDRESS__
+#include "sanitizer/lsan_interface.h"
+#endif
+
 #define bam_get_qname_l(b) ((b)->core.l_qname)
 #define bam_get_seq_l(b)  ((b)->core.l_qseq)
 #define bam_get_qual_l(b) ((b)->core.l_qseq)
@@ -142,5 +146,11 @@ int main(int argc, char const *argv[])
     sam_close(f);
 
     printf("%llx\n", acc);
+
+    #ifdef __SANITIZE_ADDRESS__
+    __lsan_do_leak_check();
+    __lsan_disable();
+    #endif
+
     return 0;
 }
