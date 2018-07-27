@@ -11,6 +11,8 @@
 #define bam_get_qname_l(b) ((b)->core.l_qname)
 #define bam_get_seq_l(b)  ((b)->core.l_qseq)
 #define bam_get_qual_l(b) ((b)->core.l_qseq)
+#define bam_is_primary(b) (!((b)->core.flag & (BAM_FSECONDARY|BAM_FSUPPLEMENTARY)))
+
 
 
 /*
@@ -130,6 +132,11 @@ int main(int argc, char const *argv[])
     XXH64_hash_t acc = 0;
     while (sam_read1(f, h, b1) >= 0)
     {
+        if (!bam_is_primary(b1))
+        {
+            continue;
+        }
+
         if (bam_is_rev(b1))
         {
             reverse_complement(bam_get_seq(b1), bam_get_seq_l(b1));
