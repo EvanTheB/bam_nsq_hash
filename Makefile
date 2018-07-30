@@ -11,3 +11,5 @@ debug: CFLAGS += -ggdb3 -fsanitize=address -fsanitize=undefined
 debug: LDFLAGS += -fsanitize=address -fsanitize=undefined
 debug: main
 
+clean:
+	rm main.o main

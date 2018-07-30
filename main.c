@@ -81,39 +81,26 @@ static void reverse(uint8_t *str, int32_t len)
     }
 }
 
-static void nibble_fiddle(uint8_t *seq, int32_t len)
-{
-    for (int32_t i = 1; i < len; ++i)
-    {
-        seq[i-1] = (seq[i-1] & 0xF0) | (seq[i] & 0xF);
-    }
-    seq[len-1] &= 0xF0;
-}
-
 static void reverse_complement(uint8_t *seq, int32_t len)
 {
     int32_t byte_len = (len + 1) / 2;
-    /* reverse seq  */
+    /* reverse seq */
     reverse(seq, byte_len);
 
-    /* account for odd length  */
+    /* account for odd length */
     if (len & 1)
     {
-        nibble_fiddle(seq, byte_len);
-    }
-
-    /* reverse? complement the nibbles
-       no reverse on odd length sequence, fiddle did it.
-    */
-    if (len & 1)
-    {
-        for (int i = 0; i < byte_len; ++i)
+        for (int32_t i = 1; i < byte_len; ++i)
         {
-            seq[i] = comp1[seq[i]];
+            seq[i-1] = comp1[(seq[i-1] & 0xF0) | (seq[i] & 0xF)];
+        }
+        if (byte_len > 0)
+        {
+            seq[byte_len-1] = comp1[seq[byte_len-1] & 0xF0];
         }
     } else
     {
-        for (int i = 0; i < byte_len; ++i)
+        for (int32_t i = 0; i < byte_len; ++i)
         {
             seq[i] = rcomp1[seq[i]];
         }
@@ -143,9 +130,9 @@ int main(int argc, char const *argv[])
             reverse(bam_get_qual(b1), bam_get_qual_l(b1));
         }
 
-        acc += XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0);
-        acc += XXH64(bam_get_seq(b1), (bam_get_seq_l(b1) + 1) / 2, 0);
-        acc += XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0);
+        acc += XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0)
+            + XXH64(bam_get_seq(b1), (bam_get_seq_l(b1) + 1) / 2, 0)
+            + XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0);
     }
 
     bam_destroy1(b1);
