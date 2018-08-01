@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <getopt.h>
 
 #include "xxhash.h"
 #include "htslib/sam.h"
@@ -25,6 +26,9 @@ KSEQ_INIT(gzFile, gzread)
 
 /*
 see seq_comp_table in samtools
+rcomp1 complements and swaps the nibbles
+comp1 just complements the nibbles
+
 import toolz.itertoolz as tz
 i = [ 0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15 ]
 o = []
@@ -38,7 +42,7 @@ for h in range(len(i)):
         o.append((i[h] << 4) + i[l])
 print(',\n'.join(', '.join(str(c) for c in l) for l in tz.partition(16, o)))
 */
-static uint8_t rcomp1[256] = {
+static const uint8_t rcomp1[256] = {
     0, 128, 64, 192, 32, 160, 96, 224, 16, 144, 80, 208, 48, 176, 112, 240,
     8, 136, 72, 200, 40, 168, 104, 232, 24, 152, 88, 216, 56, 184, 120, 248,
     4, 132, 68, 196, 36, 164, 100, 228, 20, 148, 84, 212, 52, 180, 116, 244,
@@ -57,7 +61,7 @@ static uint8_t rcomp1[256] = {
     15, 143, 79, 207, 47, 175, 111, 239, 31, 159, 95, 223, 63, 191, 127, 255
 };
 
-static uint8_t comp1[256] = {
+static const uint8_t comp1[256] = {
     0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15,
     128, 136, 132, 140, 130, 138, 134, 142, 129, 137, 133, 141, 131, 139, 135, 143,
     64, 72, 68, 76, 66, 74, 70, 78, 65, 73, 69, 77, 67, 75, 71, 79,
@@ -78,7 +82,7 @@ static uint8_t comp1[256] = {
 
 static void encode_seq(const unsigned char* restrict seq, size_t len, unsigned char* restrict enc)
 {
-    for (int i = 1, o = 0; i < len; i += 2, o++)
+    for (size_t i = 1, o = 0; i < len; i += 2, o++)
     {
         enc[o] = (seq_nt16_table[seq[i - 1]] << 4) | (seq_nt16_table[seq[i]]);
     }
@@ -90,12 +94,12 @@ static void encode_seq(const unsigned char* restrict seq, size_t len, unsigned c
 
 static void encode_qual_ip(char* seq, size_t len)
 {
-    for (int i = 0; i < len; ++i)
+    for (size_t i = 0; i < len; ++i)
     {
         seq[i] -= 33;
     }
 }
-
+/*
 static void decode_seq(const unsigned char* restrict enc, size_t len, unsigned char* restrict seq)
 {
     for (int i = 0, o = 1; o < len; o += 2, i++)
@@ -108,7 +112,7 @@ static void decode_seq(const unsigned char* restrict enc, size_t len, unsigned c
         seq[len - 1] = seq_nt16_str[enc[len / 2] >> 4];
     }
 }
-
+*/
 static void reverse(uint8_t *str, int32_t len)
 {
     int32_t high = len - 1;
@@ -148,54 +152,60 @@ static void reverse_complement(uint8_t *seq, int32_t len)
     }
 }
 
-void hash_bam(const char *filename)
+static void hash_bam(int argc, char *argv[])
 {
-    samFile *f = sam_open(filename, "r");
-
-    bam_hdr_t *h = sam_hdr_read(f);
-
-    bam1_t *b1 = bam_init1();
-
     XXH64_hash_t acc = 0;
-    while (sam_read1(f, h, b1) >= 0)
+
+    for (int i = 0; i < argc; ++i)
     {
-        if (!bam_is_primary(b1))
+        samFile *f = sam_open(argv[i], "r");
+
+        bam_hdr_t *h = sam_hdr_read(f);
+
+        bam1_t *b1 = bam_init1();
+
+        while (sam_read1(f, h, b1) >= 0)
         {
-            continue;
+            if (!bam_is_primary(b1))
+            {
+                continue;
+            }
+
+            if (bam_is_rev(b1))
+            {
+                reverse_complement(bam_get_seq(b1), bam_get_seq_l_nibbles(b1));
+                reverse(bam_get_qual(b1), bam_get_qual_l(b1));
+            }
+            else if (bam_get_seq_l_nibbles(b1) & 1)
+            {
+                // if the last byte only contains one nibble
+                // zero the other nibble
+                bam_get_seq(b1)[bam_get_seq_l(b1)-1] &= 0xF0;
+            }
+
+            // unsigned char b[100] = {0};
+            // decode_seq(bam_get_seq(b1), bam_get_seq_l_nibbles(b1), b);
+            // printf("%s\n", b);
+
+            // printf("%d %.*s %llx\n", bam_get_qname_l(b1), bam_get_qname_l(b1), bam_get_qname(b1), XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0));
+            // printf("%d %.*s %llx\n", bam_get_seq_l(b1), bam_get_seq_l(b1), bam_get_seq(b1), XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0));
+            // printf("%d %.*s %llx\n", bam_get_qual_l(b1), bam_get_qual_l(b1), bam_get_qual(b1), XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0));
+
+            acc += XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0)
+                + XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0)
+                + XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0);
+            // printf("%llx\n", acc);
         }
 
-        if (bam_is_rev(b1))
-        {
-            reverse_complement(bam_get_seq(b1), bam_get_seq_l_nibbles(b1));
-            reverse(bam_get_qual(b1), bam_get_qual_l(b1));
-        }
-        else if (bam_get_seq_l_nibbles(b1) & 1)
-        {
-            bam_get_seq(b1)[bam_get_seq_l(b1)-1] &= 0xF0;
-        }
-
-        // unsigned char b[100] = {0};
-        // decode_seq(bam_get_seq(b1), bam_get_seq_l_nibbles(b1), b);
-        // printf("%s\n", b);
-
-        // printf("%d %.*s %llx\n", bam_get_qname_l(b1), bam_get_qname_l(b1), bam_get_qname(b1), XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0));
-        // printf("%d %.*s %llx\n", bam_get_seq_l(b1), bam_get_seq_l(b1), bam_get_seq(b1), XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0));
-        // printf("%d %.*s %llx\n", bam_get_qual_l(b1), bam_get_qual_l(b1), bam_get_qual(b1), XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0));
-
-        acc += XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0)
-            + XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0)
-            + XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0);
-        // printf("%llx\n", acc);
+        bam_destroy1(b1);
+        bam_hdr_destroy(h);
+        sam_close(f);
     }
-
-    bam_destroy1(b1);
-    bam_hdr_destroy(h);
-    sam_close(f);
 
     printf("%llx\n", acc);
 }
 
-void hash_fastq(int argc, char const *argv[])
+static void hash_fastq(int argc, char *argv[])
 {
     XXH64_hash_t acc = 0;
 
@@ -204,7 +214,11 @@ void hash_fastq(int argc, char const *argv[])
 
     for (int i = 0; i < argc; ++i)
     {
-        int fd = open(argv[i], O_RDONLY);
+        int fd = 0;
+        if (strcmp("-", argv[i]))
+        {
+            fd = open(argv[i], O_RDONLY);
+        }
         gzFile fp = gzdopen(fd, "r");
         kseq_t *kp = kseq_init(fp);
 
@@ -233,20 +247,38 @@ void hash_fastq(int argc, char const *argv[])
         }
 
         kseq_destroy(kp);
-        gzclose(fp);
+        gzclose_r(fp);
     }
+    free(nibbled_seq);
+
     printf("%llx\n", acc);
 }
 
-int main(int argc, char const *argv[])
+static const char * const usage =
+"Usage: %s [-fz] [filename]*\n"
+"   -f: fastq input\n";
+int main(int argc, char *argv[])
 {
-    if (argv[1][0] == '-')
+    int fastq = 0;
+    int opt;
+    while ((opt = getopt(argc, argv, "f")) != -1) {
+        switch (opt) {
+        case 'f':
+            fastq = 1;
+            break;
+        default: /* '?' */
+            fprintf(stderr, usage, argv[0]);
+            exit(EXIT_FAILURE);
+       }
+    }
+
+    if (fastq)
     {
-        hash_fastq(argc - 2, argv + 2);
+        hash_fastq(argc - optind, argv + optind);
     }
     else
     {
-        hash_bam(argv[1]);
+        hash_bam(argc - optind, argv + optind);
     }
 
     #ifdef __SANITIZE_ADDRESS__
