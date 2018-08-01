@@ -209,7 +209,7 @@ static int hash_bam(int argc, char *argv[])
         if (read_err < -1) return 1;
     }
 
-    printf("%llx\n", acc);
+    printf("%.16llx\n", acc);
     return 0;
 }
 
@@ -267,7 +267,7 @@ static int hash_fastq(int argc, char *argv[])
     }
     free(nibbled_seq);
 
-    printf("%llx\n", acc);
+    printf("%.16llx\n", acc);
     return 0;
 }
 
