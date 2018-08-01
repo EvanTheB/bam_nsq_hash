@@ -152,19 +152,24 @@ static void reverse_complement(uint8_t *seq, int32_t len)
     }
 }
 
-static void hash_bam(int argc, char *argv[])
+// returns 0 on success, does not cleanup on error.
+static int hash_bam(int argc, char *argv[])
 {
     XXH64_hash_t acc = 0;
 
     for (int i = 0; i < argc; ++i)
     {
         samFile *f = sam_open(argv[i], "r");
+        if (!f) return 1;
 
         bam_hdr_t *h = sam_hdr_read(f);
+        if (!h) return 1;
 
         bam1_t *b1 = bam_init1();
+        if (!b1) return 1;
 
-        while (sam_read1(f, h, b1) >= 0)
+        int read_err;
+        while ((read_err = sam_read1(f, h, b1)) >= 0)
         {
             if (!bam_is_primary(b1))
             {
@@ -200,12 +205,16 @@ static void hash_bam(int argc, char *argv[])
         bam_destroy1(b1);
         bam_hdr_destroy(h);
         sam_close(f);
+
+        if (read_err < -1) return 1;
     }
 
     printf("%llx\n", acc);
+    return 0;
 }
 
-static void hash_fastq(int argc, char *argv[])
+// returns 0 on success, does not cleanup on error.
+static int hash_fastq(int argc, char *argv[])
 {
     XXH64_hash_t acc = 0;
 
@@ -219,10 +228,15 @@ static void hash_fastq(int argc, char *argv[])
         {
             fd = open(argv[i], O_RDONLY);
         }
+        if (fd < 0) return 1;
+
         gzFile fp = gzdopen(fd, "r");
+        if (!fp) return 1;
+
         kseq_t *kp = kseq_init(fp);
 
-        while (kseq_read(kp) >= 0)
+        int read_err;
+        while ((read_err = kseq_read(kp)) >= 0)
         {
             if (nibbled_seq_len < kp->seq.l)
             {
@@ -247,11 +261,14 @@ static void hash_fastq(int argc, char *argv[])
         }
 
         kseq_destroy(kp);
-        gzclose_r(fp);
+        if (Z_OK != gzclose_r(fp)) return 1;
+
+        if (read_err < -1) return 1;
     }
     free(nibbled_seq);
 
     printf("%llx\n", acc);
+    return 0;
 }
 
 static const char * const usage =
@@ -272,13 +289,14 @@ int main(int argc, char *argv[])
        }
     }
 
+    int err;
     if (fastq)
     {
-        hash_fastq(argc - optind, argv + optind);
+        err = hash_fastq(argc - optind, argv + optind);
     }
     else
     {
-        hash_bam(argc - optind, argv + optind);
+        err = hash_bam(argc - optind, argv + optind);
     }
 
     #ifdef __SANITIZE_ADDRESS__
@@ -286,5 +304,10 @@ int main(int argc, char *argv[])
     __lsan_disable();
     #endif
 
-    return 0;
+    if (err)
+    {
+        fprintf(stderr, "error\n");
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }

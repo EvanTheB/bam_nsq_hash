@@ -4,7 +4,7 @@ LDLIBS = -lpthread -lz -llzma -lbz2
 
 main: main.o ../../download/xxHash/libxxhash.a ../../download/htslib/libhts.a
 
-release: CFLAGS += -O2
+release: CFLAGS += -O3
 release: main
 
 debug: CFLAGS += -ggdb3 -fsanitize=address -fsanitize=undefined
