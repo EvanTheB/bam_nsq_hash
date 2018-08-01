@@ -80,23 +80,23 @@ static const uint8_t comp1[256] = {
     240, 248, 244, 252, 242, 250, 246, 254, 241, 249, 245, 253, 243, 251, 247, 255
 };
 
-static void encode_seq(const unsigned char* restrict seq, size_t len, unsigned char* restrict enc)
+static void encode_seq(unsigned char* restrict dest, const unsigned char* restrict src, size_t len)
 {
     for (size_t i = 1, o = 0; i < len; i += 2, o++)
     {
-        enc[o] = (seq_nt16_table[seq[i - 1]] << 4) | (seq_nt16_table[seq[i]]);
+        dest[o] = (seq_nt16_table[src[i - 1]] << 4) | (seq_nt16_table[src[i]]);
     }
     if (len & 1)
     {
-        enc[len / 2] = (seq_nt16_table[seq[len - 1]] << 4);
+        dest[len / 2] = (seq_nt16_table[src[len - 1]] << 4);
     }
 }
 
-static void encode_qual_ip(char* seq, size_t len)
+static void encode_qual(unsigned char* restrict dest, const unsigned char* restrict src, size_t len)
 {
     for (size_t i = 0; i < len; ++i)
     {
-        seq[i] -= 33;
+        dest[i] = src[i] - 33;
     }
 }
 /*
@@ -113,41 +113,36 @@ static void decode_seq(const unsigned char* restrict enc, size_t len, unsigned c
     }
 }
 */
-static void reverse(uint8_t *str, int32_t len)
+static void reverse(unsigned char *restrict dest, const unsigned char *restrict src, int32_t len)
 {
-    int32_t high = len - 1;
-    int32_t low = 0;
-    uint8_t t;
-    for (; high > low; low++, high--)
+    for (int32_t i = 0; i < len; i++)
     {
-        t = str[high];
-        str[high] = str[low];
-        str[low] = t;
+        dest[i] = src[len - 1 - i];
     }
 }
 
-static void reverse_complement(uint8_t *seq, int32_t len)
+static void reverse_complement(unsigned char *restrict dest, const unsigned char *restrict src, int32_t len)
 {
     int32_t byte_len = (len + 1) / 2;
     /* reverse seq */
-    reverse(seq, byte_len);
+    reverse(dest, src, byte_len);
 
     /* account for odd length */
     if (len & 1)
     {
         for (int32_t i = 1; i < byte_len; ++i)
         {
-            seq[i-1] = comp1[(seq[i-1] & 0xF0) | (seq[i] & 0xF)];
+            dest[i-1] = comp1[(dest[i-1] & 0xF0) | (dest[i] & 0xF)];
         }
         if (byte_len > 0)
         {
-            seq[byte_len-1] = comp1[seq[byte_len-1] & 0xF0];
+            dest[byte_len-1] = comp1[dest[byte_len-1] & 0xF0];
         }
     } else
     {
         for (int32_t i = 0; i < byte_len; ++i)
         {
-            seq[i] = rcomp1[seq[i]];
+            dest[i] = rcomp1[dest[i]];
         }
     }
 }
@@ -156,6 +151,8 @@ static void reverse_complement(uint8_t *seq, int32_t len)
 static int hash_bam(int argc, char *argv[])
 {
     XXH64_hash_t acc = 0;
+    unsigned char* hash_buf = malloc(1024);
+    size_t hash_buf_len = 1024;
 
     for (int i = 0; i < argc; ++i)
     {
@@ -176,16 +173,38 @@ static int hash_bam(int argc, char *argv[])
                 continue;
             }
 
-            if (bam_is_rev(b1))
+            if (hash_buf_len < bam_get_qname_l(b1) + bam_get_seq_l(b1) + bam_get_qual_l(b1))
             {
-                reverse_complement(bam_get_seq(b1), bam_get_seq_l_nibbles(b1));
-                reverse(bam_get_qual(b1), bam_get_qual_l(b1));
+                hash_buf_len = 2 * (bam_get_qname_l(b1) + bam_get_seq_l(b1) + bam_get_qual_l(b1));
+                hash_buf = realloc(hash_buf, hash_buf_len);
             }
-            else if (bam_get_seq_l_nibbles(b1) & 1)
+
+            if (bam_get_seq_l_nibbles(b1) & 1)
             {
                 // if the last byte only contains one nibble
                 // zero the other nibble
                 bam_get_seq(b1)[bam_get_seq_l(b1)-1] &= 0xF0;
+            }
+
+            if (bam_is_rev(b1))
+            {
+                memcpy(hash_buf, bam_get_qname(b1), bam_get_qname_l(b1));
+                reverse_complement(hash_buf + bam_get_qname_l(b1),
+                    bam_get_seq(b1),
+                    bam_get_seq_l_nibbles(b1));
+                reverse(hash_buf + bam_get_qname_l(b1) + bam_get_seq_l(b1),
+                    bam_get_qual(b1),
+                    bam_get_qual_l(b1));
+            }
+            else
+            {
+                memcpy(hash_buf, bam_get_qname(b1), bam_get_qname_l(b1));
+                memcpy(hash_buf + bam_get_qname_l(b1),
+                    bam_get_seq(b1),
+                    bam_get_seq_l(b1));
+                memcpy(hash_buf + bam_get_qname_l(b1) + bam_get_seq_l(b1),
+                    bam_get_qual(b1),
+                    bam_get_qual_l(b1));
             }
 
             // unsigned char b[100] = {0};
@@ -196,9 +215,7 @@ static int hash_bam(int argc, char *argv[])
             // printf("%d %.*s %llx\n", bam_get_seq_l(b1), bam_get_seq_l(b1), bam_get_seq(b1), XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0));
             // printf("%d %.*s %llx\n", bam_get_qual_l(b1), bam_get_qual_l(b1), bam_get_qual(b1), XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0));
 
-            acc += XXH64(bam_get_qname(b1), bam_get_qname_l(b1), 0)
-                + XXH64(bam_get_seq(b1), bam_get_seq_l(b1), 0)
-                + XXH64(bam_get_qual(b1), bam_get_qual_l(b1), 0);
+            acc += XXH64(hash_buf, bam_get_qname_l(b1) + bam_get_seq_l(b1) + bam_get_qual_l(b1), 0);
             // printf("%llx\n", acc);
         }
 
@@ -208,6 +225,7 @@ static int hash_bam(int argc, char *argv[])
 
         if (read_err < -1) return 1;
     }
+    free(hash_buf);
 
     printf("%llx\n", acc);
     return 0;
@@ -218,8 +236,8 @@ static int hash_fastq(int argc, char *argv[])
 {
     XXH64_hash_t acc = 0;
 
-    unsigned char* nibbled_seq = malloc(1024);
-    size_t nibbled_seq_len = 1024;
+    unsigned char* hash_buf = malloc(1024);
+    size_t hash_buf_len = 1024;
 
     for (int i = 0; i < argc; ++i)
     {
@@ -238,14 +256,19 @@ static int hash_fastq(int argc, char *argv[])
         int read_err;
         while ((read_err = kseq_read(kp)) >= 0)
         {
-            if (nibbled_seq_len < kp->seq.l)
+            if (hash_buf_len < kp->name.l + kp->seq.l + kp->qual.l)
             {
-                nibbled_seq = realloc(nibbled_seq, kp->seq.l * 2);
-                nibbled_seq_len = kp->seq.l * 2;
+                hash_buf_len = 2 * (kp->name.l + kp->seq.l + kp->qual.l);
+                hash_buf = realloc(hash_buf, hash_buf_len);
             }
-            encode_seq((unsigned char*)kp->seq.s, kp->seq.l, nibbled_seq);
-            size_t encoded_len = (kp->seq.l + 1) / 2;
-            encode_qual_ip(kp->qual.s, kp->qual.l);
+            memcpy(hash_buf, kp->name.s, kp->name.l);
+            encode_seq(hash_buf + kp->name.l,
+                (unsigned char*)kp->seq.s,
+                kp->seq.l);
+            int encoded_len = (kp->seq.l + 1) / 2;
+            encode_qual(hash_buf + kp->name.l + encoded_len,
+                (unsigned char*)kp->qual.s,
+                kp->qual.l);
 
             // decode_seq(nibbled_seq, kp->seq.l, nibbled_seq+100);
             // printf("%.*s\n", kp->seq.l, nibbled_seq+100);
@@ -254,9 +277,7 @@ static int hash_fastq(int argc, char *argv[])
             // printf("%d %.*s %llx\n", (int)encoded_len, (int)encoded_len, nibbled_seq, XXH64(nibbled_seq, encoded_len, 0));
             // printf("%d %.*s %llx\n", (int)kp->qual.l, (int)kp->qual.l, kp->qual.s, XXH64(kp->qual.s, kp->qual.l, 0));
 
-            acc += XXH64(kp->name.s, kp->name.l, 0)
-                + XXH64(nibbled_seq, encoded_len, 0)
-                + XXH64(kp->qual.s, kp->qual.l, 0);
+            acc += XXH64(hash_buf, kp->name.l + encoded_len + kp->qual.l, 0);
             // printf("%llx\n", acc);
         }
 
@@ -265,7 +286,7 @@ static int hash_fastq(int argc, char *argv[])
 
         if (read_err < -1) return 1;
     }
-    free(nibbled_seq);
+    free(hash_buf);
 
     printf("%llx\n", acc);
     return 0;
