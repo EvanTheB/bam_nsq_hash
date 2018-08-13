@@ -14,5 +14,9 @@ debug: main
 pedantic: CFLAGS += -Wextra -pedantic -std=c99
 pedantic: main
 
+.PHONY: clean test
 clean:
 	rm main.o main
+
+test: main
+	cd test && bash test.sh ../main
