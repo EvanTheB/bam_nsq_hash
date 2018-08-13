@@ -272,7 +272,7 @@ static int hash_fastq(int argc, char *argv[])
 }
 
 static const char * const usage =
-"Usage: %s [-fz] [filename]*\n"
+"Usage: %s [-f] [filename]*\n"
 "   -f: fastq input\n";
 int main(int argc, char *argv[])
 {

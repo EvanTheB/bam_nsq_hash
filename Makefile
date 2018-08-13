@@ -11,5 +11,8 @@ debug: CFLAGS += -ggdb3 -fsanitize=address -fsanitize=undefined
 debug: LDFLAGS += -fsanitize=address -fsanitize=undefined
 debug: main
 
+pedantic: CFLAGS += -Wextra -pedantic -std=c99
+pedantic: main
+
 clean:
 	rm main.o main
