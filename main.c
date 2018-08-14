@@ -218,8 +218,10 @@ static int hash_fastq(int argc, char *argv[])
 {
     XXH64_hash_t acc = 0;
 
-    unsigned char* nibbled_seq = malloc(1024);
     size_t nibbled_seq_len = 1024;
+    unsigned char* nibbled_seq = malloc(nibbled_seq_len);
+    if (!nibbled_seq)
+        return 1;
 
     for (int i = 0; i < argc; ++i)
     {
@@ -234,14 +236,17 @@ static int hash_fastq(int argc, char *argv[])
         if (!fp) return 1;
 
         kseq_t *kp = kseq_init(fp);
+        // kseq.h does not check for errors anyway ...
+        if (!kp) return 1;
 
         int read_err;
         while ((read_err = kseq_read(kp)) >= 0)
         {
             if (nibbled_seq_len < kp->seq.l)
             {
-                nibbled_seq = realloc(nibbled_seq, kp->seq.l * 2);
                 nibbled_seq_len = kp->seq.l * 2;
+                nibbled_seq = realloc(nibbled_seq, nibbled_seq_len);
+                if (!nibbled_seq) return 1;
             }
             encode_seq((unsigned char*)kp->seq.s, kp->seq.l, nibbled_seq);
             size_t encoded_len = (kp->seq.l + 1) / 2;
@@ -261,6 +266,7 @@ static int hash_fastq(int argc, char *argv[])
         }
 
         kseq_destroy(kp);
+        // this closes the gzdopen and the open
         if (Z_OK != gzclose_r(fp)) return 1;
 
         if (read_err < -1) return 1;
