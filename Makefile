@@ -17,7 +17,7 @@ pedantic: bam_nsq_hash
 
 .PHONY: clean test
 clean:
-	rm bam_nsq_hash
+	-rm bam_nsq_hash
 
 test: bam_nsq_hash
 	cd test && bash test.sh ../bam_nsq_hash
